@@ -1,11 +1,17 @@
 from app.application.ports.storage import IStorageService
-from app.domain.document import DocumentId, DocumentUploadRequested
+from app.application.ports.repositories.document import IDocumentRepository
+from app.domain.document import Document, Format
 
 
 class UploadDocument:
-    @staticmethod
-    def execute(
-        document_id: DocumentId, storage_service: IStorageService
-    ) -> DocumentUploadRequested:
-        presigned_url = storage_service.get_presigned_url(id_=document_id)
-        return DocumentUploadRequested(presigned_url=presigned_url)
+    def __init__(
+        self, storage: IStorageService, documents: IDocumentRepository
+    ) -> None:
+        self._storage = storage
+        self._documents = documents
+
+    def execute(self, filename: str, format: Format) -> str:
+        document = Document.create(filename=filename, format=format)
+        presigned_url = self._storage.get_presigned_url(document_id=document.id_)
+        self._documents.add(document=document)
+        return presigned_url

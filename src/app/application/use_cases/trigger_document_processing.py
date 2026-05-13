@@ -1,24 +1,24 @@
-from app.application.ports.dispatcher import IProcessingQueue
-from app.domain.document import (
-    Document,
-    DocumentProcessingTriggered,
-    DocumentUploaded,
-)
+from app.application.ports.queue import IProcessingQueue
 from app.application.ports.repositories.document import IDocumentRepository
+from app.domain.document import Document
+from app.domain.events import DocumentUploaded
+from app.domain.job import JobId
 
 
-class TriggerDocumentProcesing:
-    @staticmethod
-    def execute(
-        event: DocumentUploaded,
-        dispatcher: IProcessingQueue,
-        document_repository: IDocumentRepository,
-    ) -> DocumentProcessingTriggered:
+class TriggerDocumentProcessing:
+    def __init__(
+        self,
+        queue: IProcessingQueue,
+        documents: IDocumentRepository,
+    ) -> None:
+        self._queue = queue
+        self._documents = documents
+
+    def execute(self, event: DocumentUploaded) -> JobId:
         document = Document.create(
             id_=event.document_id,
             filename=event.filename,
             format=event.format,
         )
-        document_repository.add(document=document)
-        job_id = dispatcher.process_document(document.id_)
-        return DocumentProcessingTriggered(document_id=document.id_, job_id=job_id)
+        self._documents.add(document)
+        return self._queue.enqueue(document.id_)

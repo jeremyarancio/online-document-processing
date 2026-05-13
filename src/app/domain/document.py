@@ -1,38 +1,29 @@
-from datetime import datetime
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import StrEnum
-from uuid import UUID
 from typing import NewType
+from uuid import UUID, uuid4
 
+
+from app.domain.events import DocumentProcessingStarted, DocumentProcessed
+from app.domain.job import JobId
 
 DocumentId = NewType("DocumentId", UUID)
-
 PageId = NewType("PageId", UUID)
 
-JobId = NewType("JobId", UUID)
 
-
-class Status(StrEnum):
-    PENDING = "PENDING"
-    STARTED = "STARTED"
-    FAILURE = "FAILURE"
-    SUCCESS = "SUCCESS"
+class DocumentStatus(StrEnum):
     UPLOADING = "UPLOADING"
     UPLOADED = "UPLOADED"
+    PROCESSING = "PROCESSING"
+    PROCESSED = "PROCESSED"
+    FAILED = "FAILED"
 
 
 class Format(StrEnum):
-    pdf = "pdf"
-    png = "png"
-    jpg = "jpg"
-
-
-@dataclass
-class BoundingBox:
-    x0: int
-    x1: int
-    y0: int
-    y1: int
+    PDF = "pdf"
+    PNG = "png"
+    JPG = "jpg"
 
 
 class FigureKind(StrEnum):
@@ -41,7 +32,15 @@ class FigureKind(StrEnum):
     PICTURE = "PICTURE"
 
 
-@dataclass
+@dataclass(frozen=True)
+class BoundingBox:
+    x0: int
+    x1: int
+    y0: int
+    y1: int
+
+
+@dataclass(frozen=True)
 class Figure:
     kind: FigureKind
     bounding_box: BoundingBox
@@ -58,49 +57,49 @@ class Page:
 
 
 @dataclass
-class DocumentUploadRequested:
-    document_id: DocumentId
-    presigned_url: str
-    at: datetime = field(default_factory=datetime.now)
-
-
-@dataclass
-class DocumentUploaded:
-    document_id: DocumentId
-    filename: str
-    format: Format
-
-
-@dataclass
-class DocumentProcessingTriggered:
-    document_id: DocumentId
-    job_id: JobId
-    at: datetime = field(default_factory=datetime.now)
-
-
-@dataclass
-class DocumentProcessed:
-    document_id: DocumentId
-    at: datetime = field(default_factory=datetime.now)
-
-
-@dataclass
 class Document:
     id_: DocumentId
     filename: str
-    status: Status
     format: Format
+    status: DocumentStatus
     uploaded_at: datetime | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
     _pages: list[Page] = field(default_factory=list)
 
+    @property
+    def pages(self) -> list[Page]:
+        return list(sorted(self._pages, key=lambda page: page.number))
+
     @classmethod
-    def create(cls, id_: DocumentId, filename: str, format: Format) -> "Document":
+    def create(cls, filename: str, format: Format) -> "Document":
         return cls(
-            id_=id_,
+            id_=DocumentId(uuid4()),
             filename=filename,
             format=format,
-            status=Status.UPLOADED,
+            status=DocumentStatus.UPLOADING,
             uploaded_at=datetime.now(),
         )
+
+    def mark_processing(self, job_id: JobId) -> "DocumentProcessingStarted":
+        if self.status != DocumentStatus.UPLOADED:
+            raise ValueError(f"cannot start processing from status {self.status}")
+        self.status = DocumentStatus.PROCESSING
+        self.started_at = datetime.now()
+        return DocumentProcessingStarted(
+            document_id=self.id_, job_id=job_id, occurred_at=self.started_at
+        )
+
+    def mark_processed(self) -> "DocumentProcessed":
+        if self.status != DocumentStatus.PROCESSING:
+            raise ValueError(f"cannot mark processed from status {self.status}")
+        self.status = DocumentStatus.PROCESSED
+        self.completed_at = datetime.now()
+        return DocumentProcessed(document_id=self.id_, occurred_at=self.completed_at)
+
+    def mark_failed(self) -> None:
+        self.status = DocumentStatus.FAILED
+        self.completed_at = datetime.now()
+
+    def attach_pages(self, pages: list[Page]) -> None:
+        self._pages = list(pages)
