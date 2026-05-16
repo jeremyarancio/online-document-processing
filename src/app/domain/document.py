@@ -88,7 +88,7 @@ class Document:
         self.status = DocumentStatus.FAILED
         self.completed_at = datetime.now()
 
-    def mark_finished(self) -> None:
+    def mark_processed(self) -> None:
         self.status = DocumentStatus.PROCESSED
         self.completed_at = datetime.now()
 
