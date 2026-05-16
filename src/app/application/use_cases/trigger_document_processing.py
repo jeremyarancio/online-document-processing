@@ -1,7 +1,6 @@
 from app.application.ports.queue import IProcessingQueue
 from app.application.ports.repositories.document import IDocumentRepository
-from app.domain.document import Document
-from app.domain.events import DocumentUploaded
+from app.domain.document import DocumentId
 from app.domain.job import JobId
 
 
@@ -14,11 +13,9 @@ class TriggerDocumentProcessing:
         self._queue = queue
         self._documents = documents
 
-    def execute(self, event: DocumentUploaded) -> JobId:
-        document = Document.create(
-            id_=event.document_id,
-            filename=event.filename,
-            format=event.format,
-        )
-        self._documents.add(document)
-        return self._queue.enqueue(document.id_)
+    def execute(self, document_id: DocumentId) -> JobId:
+        document = self._documents.get(document_id=document_id)
+        document.mark_uploaded()
+        self._documents.update(document=document)
+        job_id = self._queue.enqueue(document_id=document_id)
+        return job_id

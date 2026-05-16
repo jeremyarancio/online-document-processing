@@ -5,9 +5,6 @@ from typing import NewType
 from uuid import UUID, uuid4
 
 
-from app.domain.events import DocumentProcessingStarted, DocumentProcessed
-from app.domain.job import JobId
-
 DocumentId = NewType("DocumentId", UUID)
 PageId = NewType("PageId", UUID)
 
@@ -32,7 +29,6 @@ class FigureKind(StrEnum):
     PICTURE = "PICTURE"
 
 
-@dataclass(frozen=True)
 class BoundingBox:
     x0: int
     x1: int
@@ -40,7 +36,6 @@ class BoundingBox:
     y1: int
 
 
-@dataclass(frozen=True)
 class Figure:
     kind: FigureKind
     bounding_box: BoundingBox
@@ -50,7 +45,7 @@ class Figure:
 
 @dataclass
 class Page:
-    id_: PageId
+    id_: PageId = field(default_factory=lambda: PageId(uuid4()))
     number: int = 0
     markdown: str | None = None
     figures: list[Figure] = field(default_factory=list)
@@ -81,25 +76,21 @@ class Document:
             uploaded_at=datetime.now(),
         )
 
-    def mark_processing(self, job_id: JobId) -> "DocumentProcessingStarted":
-        if self.status != DocumentStatus.UPLOADED:
-            raise ValueError(f"cannot start processing from status {self.status}")
+    def mark_uploaded(self) -> None:
+        self.status = DocumentStatus.UPLOADED
+        self.uploaded_at = datetime.now()
+
+    def mark_started(self) -> None:
         self.status = DocumentStatus.PROCESSING
         self.started_at = datetime.now()
-        return DocumentProcessingStarted(
-            document_id=self.id_, job_id=job_id, occurred_at=self.started_at
-        )
-
-    def mark_processed(self) -> "DocumentProcessed":
-        if self.status != DocumentStatus.PROCESSING:
-            raise ValueError(f"cannot mark processed from status {self.status}")
-        self.status = DocumentStatus.PROCESSED
-        self.completed_at = datetime.now()
-        return DocumentProcessed(document_id=self.id_, occurred_at=self.completed_at)
 
     def mark_failed(self) -> None:
         self.status = DocumentStatus.FAILED
         self.completed_at = datetime.now()
 
-    def attach_pages(self, pages: list[Page]) -> None:
-        self._pages = list(pages)
+    def mark_finished(self) -> None:
+        self.status = DocumentStatus.PROCESSED
+        self.completed_at = datetime.now()
+
+    def add_pages(self, pages: list[Page]) -> None:
+        self._pages = pages

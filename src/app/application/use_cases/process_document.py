@@ -1,35 +1,29 @@
-from app.application.ports.extractor import IDocumentExtractor
+from app.application.core.processor import Processor
 from app.application.ports.repositories.document import IDocumentRepository
+from app.application.ports.storage import IStorageService
 from app.domain.document import DocumentId
-from app.domain.events import DocumentProcessed, DocumentProcessingStarted
-from app.domain.job import JobId
 
 
 class ProcessDocument:
     def __init__(
         self,
+        storage: IStorageService,
         documents: IDocumentRepository,
-        extractor: IDocumentExtractor,
     ) -> None:
+        self._storage = storage
         self._documents = documents
-        self._extractor = extractor
 
-    def execute(
-        self, document_id: DocumentId, job_id: JobId
-    ) -> tuple[DocumentProcessingStarted, DocumentProcessed]:
-        document = self._documents.get(document_id)
-
-        started = document.mark_processing(job_id)
-        self._documents.save(document)
-
+    def execute(self, document_id: DocumentId):
+        document = self._documents.get(document_id=document_id)
+        document.mark_started()
         try:
-            pages = self._extractor.extract(document.id_)
-            document.attach_pages(pages)
-            processed = document.mark_processed()
-            self._documents.save(document)
+            content = self._storage.get_document(document_id=document_id)
+            pages = Processor(documents=self._documents, storage=self._storage).process(
+                content=content
+            )
+            document.add_pages(pages=pages)
+            document.mark_finished()
+            self._documents.update(document=document)
         except Exception:
             document.mark_failed()
-            self._documents.save(document)
-            raise
-
-        return started, processed
+            self._documents.update(document=document)
