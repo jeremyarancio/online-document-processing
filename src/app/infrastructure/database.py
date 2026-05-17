@@ -1,6 +1,8 @@
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import Iterator
 from uuid import UUID
 
 from app.application.ports.repositories.document import IDocumentRepository
@@ -14,62 +16,52 @@ from app.domain.document import (
 )
 
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS documents (
-    id TEXT PRIMARY KEY,
-    filename TEXT NOT NULL,
-    format TEXT NOT NULL,
-    status TEXT NOT NULL,
-    uploaded_at TEXT,
-    started_at TEXT,
-    completed_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS pages (
-    id TEXT PRIMARY KEY,
-    document_id TEXT NOT NULL,
-    number INTEGER NOT NULL,
-    markdown TEXT,
-    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
-);
-"""
-
-
 class SqliteDocumentRepository(IDocumentRepository):
     def __init__(self, db_path: Path) -> None:
-        self._connection = sqlite3.connect(
-            str(db_path),
-            check_same_thread=False,
-            isolation_level=None,
-        )
-        self._connection.execute("PRAGMA foreign_keys = ON")
-        self._connection.executescript(_SCHEMA)
+        self._db_path = str(db_path)
+
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        conn = sqlite3.connect(self._db_path)
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA synchronous = NORMAL")
+            yield conn
+        finally:
+            conn.close()
 
     def add(self, document: Document) -> None:
-        with self._connection:
-            self._connection.execute(
-                "INSERT INTO documents "
-                "(id, filename, format, status, uploaded_at, started_at, completed_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO documents
+                    (id, filename, format, status, uploaded_at, started_at, completed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?);
+                """,
                 self._document_row(document),
             )
-            self._insert_pages(document)
+            self._insert_pages(conn, document)
 
     def get(self, document_id: DocumentId) -> Document:
-        row = self._connection.execute(
-            "SELECT id, filename, format, status, uploaded_at, started_at, completed_at "
-            "FROM documents WHERE id = ?",
-            (str(document_id),),
-        ).fetchone()
-        if row is None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT id, filename, format, status, uploaded_at, started_at, completed_at
+                FROM documents
+                WHERE id = ?
+                """,
+                (str(document_id),),
+            ).fetchone()
+            if row:
+                return self._row_to_document(row, self._fetch_pages(conn, document_id))
             raise LookupError(f"Document {document_id} not found")
-        return self._row_to_document(row, self._fetch_pages(document_id))
 
     def update(self, document: Document) -> None:
-        with self._connection:
-            self._connection.execute(
-                "UPDATE documents SET filename = ?, format = ?, status = ?, "
-                "uploaded_at = ?, started_at = ?, completed_at = ? WHERE id = ?",
+        with self._connect() as conn:
+            conn.execute(
+                """UPDATE documents 
+                SET filename = ?, format = ?, status = ?, "uploaded_at = ?, started_at = ?, completed_at = ? 
+                WHERE id = ?,
+                """,
                 (
                     document.filename,
                     document.format.value,
@@ -80,26 +72,28 @@ class SqliteDocumentRepository(IDocumentRepository):
                     str(document.id_),
                 ),
             )
-            self._connection.execute(
+            conn.execute(
                 "DELETE FROM pages WHERE document_id = ?",
                 (str(document.id_),),
             )
-            self._insert_pages(document)
+            self._insert_pages(conn, document)
 
-    def _insert_pages(self, document: Document) -> None:
+    def _insert_pages(self, conn: sqlite3.Connection, document: Document) -> None:
         rows = [
             (str(page.id_), str(document.id_), page.number, page.markdown)
             for page in document.pages
         ]
         if rows:
-            self._connection.executemany(
+            conn.executemany(
                 "INSERT INTO pages (id, document_id, number, markdown) "
                 "VALUES (?, ?, ?, ?)",
                 rows,
             )
 
-    def _fetch_pages(self, document_id: DocumentId) -> list[Page]:
-        rows = self._connection.execute(
+    def _fetch_pages(
+        self, conn: sqlite3.Connection, document_id: DocumentId
+    ) -> list[Page]:
+        rows = conn.execute(
             "SELECT id, number, markdown FROM pages WHERE document_id = ?",
             (str(document_id),),
         ).fetchall()

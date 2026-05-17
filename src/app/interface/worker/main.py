@@ -7,6 +7,7 @@ celery_app = Celery(
     "app",
     broker=os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0"),
     backend=os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/0"),
+    include=["app.interface.worker.tasks"],
 )
 celery_app.conf.task_serializer = "json"
 celery_app.conf.result_serializer = "json"

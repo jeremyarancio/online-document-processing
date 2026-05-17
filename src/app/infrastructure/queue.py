@@ -1,5 +1,3 @@
-from uuid import UUID
-
 from celery import Celery
 
 from app.application.ports.queue import IProcessingQueue
@@ -16,4 +14,4 @@ class CeleryProcessingQueue(IProcessingQueue):
             job_name,
             args=[document_id],
         )
-        return JobId(UUID(result.id))
+        return JobId(result.id)

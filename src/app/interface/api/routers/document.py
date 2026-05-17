@@ -1,6 +1,6 @@
 from typing import Annotated
 from uuid import UUID
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 
 from app.application.ports.queue import IProcessingQueue
 from app.application.ports.repositories.document import IDocumentRepository
