@@ -1,9 +1,8 @@
 from enum import StrEnum
 from typing import NewType
-from uuid import UUID
 
 
-JobId = NewType("JobId", UUID)
+JobId = NewType("JobId", str)
 
 
 class JobStatus(StrEnum):
